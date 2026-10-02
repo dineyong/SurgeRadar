@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "surgeradar"
-version = "0.4.0"
+version = "0.5.0"
 description = "Alpaca diagnostics, surge detector and entitlement-gated universe selection"
 requires-python = ">=3.11"
 dependencies = ["websockets>=15,<18", "psutil>=5.9,<8"]

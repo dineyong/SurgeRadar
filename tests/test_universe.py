@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
 from surgeradar.cli import main
-from surgeradar.universe import AlpacaScreener, ENDPOINTS, NoRedirect, SelectionConfig, parse_source, probe, select
+from surgeradar.universe import AlpacaScreener, ENDPOINTS, NoRedirect, SelectionConfig, parse_source, probe, rank_candidates as select
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "screener_universe.json"
 ENV = {"APCA_API_KEY_ID": "fake-key", "APCA_API_SECRET_KEY": 'fake-secret"quoted'}
@@ -176,7 +176,9 @@ class UniverseCliTests(unittest.TestCase):
     def invoke(self, argv, responses=None, extra=None):
         env = {**ENV, **(extra or {})}
         with patch.dict(os.environ, env, clear=True), patch("sys.stdout", new_callable=io.StringIO) as output, \
-                patch("surgeradar.universe.AlpacaScreener.fetch") as fetch:
+                patch("surgeradar.universe.AlpacaScreener.fetch") as fetch, \
+                patch("surgeradar.assets.AlpacaAssets.fetch_active", return_value=(200,
+                    list(json.loads(FIXTURE.read_text(encoding="utf-8"))["assets"].values()), {})):
             if responses is not None:
                 fetch.side_effect = responses
             code = main(argv)
@@ -200,10 +202,11 @@ class UniverseCliTests(unittest.TestCase):
         code, rows, calls = self.invoke(["universe-check"], [(403, None, {}), (403, None, {})])
         self.assertEqual(code, 4)
         self.assertEqual(calls, 2)
-        self.assertFalse(rows[0]["discovery_enabled"])
-        self.assertEqual([s["http_status"] for s in rows[0]["sources"]], [403, 403])
-        self.assertEqual(rows[0]["api_version"], "v1beta1")
-        self.assertEqual(rows[0]["entitlement"], "forbidden")
+        row = next(r for r in rows if r["event"] == "universe_check")
+        self.assertFalse(row["discovery_enabled"])
+        self.assertEqual([s["http_status"] for s in row["sources"]], [403, 403])
+        self.assertEqual(row["api_version"], "v1beta1")
+        self.assertEqual(row["entitlement"], "forbidden")
 
     def test_check_429_no_retry(self):
         code, rows, calls = self.invoke(["universe-check"], [(429, None, {"Retry-After": "120"})])
@@ -215,9 +218,10 @@ class UniverseCliTests(unittest.TestCase):
         code, rows, calls = self.invoke(["universe-check"], [(200, body["actives"], {}), (403, None, {})])
         self.assertEqual(code, 0)
         self.assertEqual(calls, 2)
-        self.assertTrue(rows[0]["access_verified"])
-        self.assertTrue(rows[0]["discovery_available"])
-        self.assertFalse(rows[0]["discovery_enabled"])
+        row = next(r for r in rows if r["event"] == "universe_check")
+        self.assertTrue(row["access_verified"])
+        self.assertTrue(row["discovery_available"])
+        self.assertFalse(row["discovery_enabled"])
 
     def test_second_source_rate_limit_disables_even_with_first_success(self):
         body = json.loads(FIXTURE.read_text(encoding="utf-8"))

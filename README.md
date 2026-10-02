@@ -1,4 +1,4 @@
-# SurgeRadar V0.4
+# SurgeRadar V0.5
 
 Issues [#2](https://github.com/dineyong/SurgeRadar/issues/2) and
 [#3](https://github.com/dineyong/SurgeRadar/issues/3): validate explicitly selected
@@ -7,6 +7,89 @@ Issue [#4](https://github.com/dineyong/SurgeRadar/issues/4) adds an independent
 detector core and offline replay. Issue [#5](https://github.com/dineyong/SurgeRadar/issues/5)
 connects that same Detector to live minute bars only in `live-detect` mode.
 No relative-volume baseline, database, alerts, post-signal tracking or trading code.
+
+## Verified common-stock universe
+
+Issue [#7](https://github.com/dineyong/SurgeRadar/issues/7) adds asset-master
+enrichment and a conservative ordinary common-stock filter. Using existing
+environment credentials, from the repository root:
+
+```powershell
+$env:SURGERADAR_ASSET_ENVIRONMENT = 'paper'
+.\.venv\Scripts\python.exe -m surgeradar asset-check
+.\.venv\Scripts\python.exe -m surgeradar universe-check
+```
+
+`asset-check` independently checks asset metadata access and reports HTTP status,
+access state, asset_count, common_stock_verified_count and
+common_stock_filtering_usable. `universe-check` reports screener and asset access
+separately and whether there are verified common stocks among the screener
+candidates. Its exit code retains the screener-access meaning; inspect the
+asset_metadata and common_stock_filtering_usable fields too. Accessible but empty
+or unclassifiable asset metadata is not evidence that filtering is usable.
+
+The asset provider makes one bounded, 10-second GET to
+`https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity`.
+SURGERADAR_ASSET_ENVIRONMENT may explicitly be `paper` (default) or `live`
+(`https://api.alpaca.markets`), matching the credential environment. This does not
+enable paid data or place orders. There is no automatic environment fallback,
+retry or per-symbol request; the bulk response, including failures, is cached
+in memory for this command only. A screener 429 prevents the asset request;
+an asset 429 stops selection. Raw asset bodies are not logged. Actual access
+remains unverified in the implementation environment without API credentials.
+
+Alpaca's documented asset schema provides class, status, tradable, exchange and
+name but no reliable universal common-stock subtype. `us_equity` includes
+instruments beyond ordinary shares. This filter requires active, tradable,
+us_equity metadata on a supported US exchange plus affirmative `Common Stock`,
+`Common Shares` or `Ordinary Shares` language in the asset-master name. Warrant,
+right, unit, ETF/fund/ETP, leveraged/inverse, preferred, depositary receipt and
+note/bond descriptions take precedence over common-share wording.
+This conservative name policy can omit real common stocks whose names are
+ambiguous; absence of an exclusion keyword never verifies a stock.
+US equity classification verifies the US-listed asset category, not US domicile.
+
+Missing/incomplete metadata, symbol mismatches and names with no positive
+ordinary-share identification become `metadata_unverified`. Missing-metadata
+ticker patterns ending W/.W/.WS, .R/.RT and .U are recorded only as explicit
+conservative exclusion hints, never as evidence of a common stock. Confirmed
+common metadata takes precedence over a ticker suffix. No optional instrument
+type field is invented or assumed from the Alpaca schema.
+
+Final selection unions and deduplicates all source candidates, classifies them,
+keeps only `common_stock_verified`, and caps the original rank-combination
+ordering at 30. Original source ranks/weights/scores are preserved without
+renumbering eligible stocks. Eligible candidates below the first 30 raw ranks
+can still enter the final list. Fewer than 30 verified stocks means fewer results.
+The default `select()` is strict; `rank_candidates()` is the independent scoring
+primitive retained for regression tests, not a final verified universe.
+
+Universe JSON now contains candidates with classification and a whitelisted
+asset_summary (symbol/class/status/tradable/exchange/name/verification_basis),
+assessments for every union candidate, excluded_count, excluded_breakdown and
+metadata_coverage counts. All candidates have one of common_stock_verified,
+excluded_with_reason or metadata_unverified. excluded_count includes unverified
+symbols removed from the final list. Reasons can overlap, so breakdown counts
+are not a partition; metadata_coverage classification counts are a partition.
+Verified stocks beyond the 30-symbol cap remain visible in assessments and are
+not counted as instrument exclusions. Version is `v0.2-verified-common-stock`.
+Asset access failure returns no unverified fill; its HTTP/access failure remains
+visible, with empty symbols and metadata-unverified candidate assessments.
+
+Fixture example (no network):
+
+```powershell
+.\.venv\Scripts\python.exe -m surgeradar universe --universe-fixture fixtures/common_stock_universe.json
+```
+
+The synthetic example has 15 candidates, retains AAPL/MSFT, excludes 11 known
+unwanted instruments and removes 2 metadata-unverified symbols, for
+count=2 / excluded_count=13. Fixture names/statuses are synthetic test inputs,
+not a live account result.
+
+Official sources checked 2026-10-02:
+[asset master endpoint](https://docs.alpaca.markets/us/reference/get-v2-assets-1),
+[Alpaca Asset schema](https://github.com/alpacahq/alpaca-py/blob/master/alpaca/trading/models.py).
 
 ## Free-plan universe access diagnostic and selection
 
@@ -78,11 +161,9 @@ are 1/1, configurable positive integers via SURGERADAR_UNIVERSE_MOVER_WEIGHT
 and SURGERADAR_UNIVERSE_ACTIVE_WEIGHT. Scores are exact rational strings.
 
 Each selected symbol exposes mover_rank, active_rank, score, source reasons and
-asset_metadata_verified. Where optional asset metadata is supplied to the
-selector, non-us_equity, inactive and untradable assets are excluded. Fully
-verified metadata requires class=us_equity, status=active and tradable=true.
-Missing/partial metadata stays explicitly unverified; no extra asset endpoint
-is queried. The fixture supports an `assets` map for this boundary.
+asset_metadata_verified. V0.5 requires verified common-stock asset metadata;
+unknown instruments are removed from the final list. The fixture supports an
+`assets` map; live selection queries the bulk asset master once per command.
 
 Universe JSON includes generated_at, universe_version, symbols, count,
 candidates, config and limitations. Screener outputs are labeled

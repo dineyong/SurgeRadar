@@ -12,7 +12,7 @@ from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-UNIVERSE_VERSION = "v0.1-rank-combination"
+UNIVERSE_VERSION = "v0.2-verified-common-stock"
 ENDPOINTS = {
     "actives": "https://data.alpaca.markets/v1beta1/screener/stocks/most-actives?top=100&by=volume",
     "movers": "https://data.alpaca.markets/v1beta1/screener/stocks/movers?top=50",
@@ -20,7 +20,8 @@ ENDPOINTS = {
 LIMITATIONS = ["screener_access_not_assumed", "screener_uses_sip_based_data",
                "monitoring_is_single_exchange_iex", "max_30_explicit_symbols",
                "missing_asset_metadata_not_verified", "may_include_previous_session_movers",
-               "ranking_not_predictive", "no_paid_fallback"]
+               "ranking_not_predictive", "no_paid_fallback", "verified_common_stocks_only",
+               "asset_name_classification_conservative", "us_equity_does_not_prove_us_domicile"]
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -37,14 +38,17 @@ class AlpacaScreener:
         self.key, self.secret = key, secret
 
     def fetch(self, source):
-        request = Request(ENDPOINTS[source], headers={"APCA-API-KEY-ID": self.key,
+        return self.fetch_url(ENDPOINTS[source])
+
+    def fetch_url(self, url, maximum_bytes=1_048_576):
+        request = Request(url, headers={"APCA-API-KEY-ID": self.key,
                                                    "APCA-API-SECRET-KEY": self.secret,
                                                    "Accept": "application/json"})
         try:
             with build_opener(NoRedirect()).open(request, timeout=10) as response:
                 # Both endpoints are bounded lists; bound response memory too.
-                raw = response.read(1_048_577)
-                if len(raw) > 1_048_576:
+                raw = response.read(maximum_bytes + 1)
+                if len(raw) > maximum_bytes:
                     return response.status, None, {}
                 try:
                     body = json.loads(raw)
@@ -135,7 +139,7 @@ class SelectionConfig:
             raise ValueError("invalid_selection_config")
 
 
-def select(sources, config=None, assets=None):
+def rank_candidates(sources, config=None, assets=None, *, apply_limit=True):
     config = config or SelectionConfig()
     assets = assets or {}
     merged = {}
@@ -157,24 +161,55 @@ def select(sources, config=None, assets=None):
             item["mover_rank" if source == "movers" else "active_rank"] = row["rank"]
             item["reasons"].append("top_gainer" if source == "movers" else "most_active_by_volume")
             item["asset_metadata_verified"] = metadata is not None and all(k in metadata for k in ("class", "status", "tradable"))
-    ranked = sorted(merged.values(), key=lambda item: (-item["score"], item["symbol"]))[:config.limit]
+    ranked = sorted(merged.values(), key=lambda item: (-item["score"], item["symbol"]))
+    if apply_limit:
+        ranked = ranked[:config.limit]
     return [{**item, "score": str(item["score"]), "reasons": sorted(item["reasons"])} for item in ranked]
+
+
+def filtered_universe(sources, config=None, assets=None):
+    from collections import Counter
+    from .assets import classify
+    config = config or SelectionConfig()
+    ranked = rank_candidates(sources, config, apply_limit=False)
+    assessments = []
+    for item in ranked:
+        classification = classify(item["symbol"], (assets or {}).get(item["symbol"]))
+        assessments.append({**item, **classification,
+                            "asset_metadata_verified": classification["classification"] == "common_stock_verified"})
+    eligible = [item for item in assessments if item["classification"] == "common_stock_verified"]
+    removed = [item for item in assessments if item["classification"] != "common_stock_verified"]
+    return {"candidates": [{**item, "asset_metadata_verified": True} for item in eligible[:config.limit]],
+            "assessments": assessments, "excluded_count": len(removed),
+            "excluded_breakdown": dict(sorted(Counter(reason for item in removed for reason in item["filter_reasons"]).items())),
+            "metadata_coverage": {"total_candidates": len(assessments),
+                "common_stock_verified": len(eligible),
+                "excluded_with_reason": sum(item["classification"] == "excluded_with_reason" for item in assessments),
+                "metadata_unverified": sum(item["classification"] == "metadata_unverified" for item in assessments)}}
+
+
+def select(sources, config=None, assets=None):
+    return filtered_universe(sources, config, assets)["candidates"]
 
 
 def main(mode, fixture=None):
     from .logging import JsonLog
+    from .assets import AlpacaAssets, classify, probe_assets
     key, secret = os.environ.get("APCA_API_KEY_ID", "").strip(), os.environ.get("APCA_API_SECRET_KEY", "").strip()
     log = JsonLog(secrets=(key, secret))
     log.context.update(feed="sip_based_screener", coverage_class="discovery_not_stream_coverage",
                        api_version="v1beta1", entitlement="unverified", limitations=LIMITATIONS)
+    if mode == "asset-check":
+        log.context.update(feed="asset_master", api_version="v2")
     if mode == "universe" and not fixture and os.environ.get("SURGERADAR_DISCOVERY_ENABLED") != "true":
         log.emit("universe_disabled", discovery_enabled=False, reason="run_universe_check_first_then_explicitly_enable")
         return 2
     try:
-        config = (SelectionConfig() if mode == "universe-check" else
+        config = (SelectionConfig() if mode != "universe" else
                   SelectionConfig(mover_weight=int(os.environ.get("SURGERADAR_UNIVERSE_MOVER_WEIGHT", "1")),
                                   active_weight=int(os.environ.get("SURGERADAR_UNIVERSE_ACTIVE_WEIGHT", "1"))))
         assets = {}
+        asset_status = {"access": "fixture_only", "http_status": None}
         if fixture:
             body = json.loads(Path(fixture).read_text(encoding="utf-8"))
             sources = {s: parse_source(s, body[s]) for s in ENDPOINTS if s in body}
@@ -184,31 +219,50 @@ def main(mode, fixture=None):
             statuses = []
         else:
             if not key or not secret or any(c in key + secret for c in "\r\n"):
-                log.emit("universe_check", discovery_enabled=False, reason="credentials_missing_or_invalid", sources=[])
+                log.emit("asset_check" if mode == "asset-check" else "universe_check",
+                         discovery_enabled=False, reason="credentials_missing_or_invalid", sources=[])
                 return 2
-            statuses, sources = probe(AlpacaScreener(key, secret))
+            statuses, sources = ([], {}) if mode == "asset-check" else probe(AlpacaScreener(key, secret))
+            asset_provider = AlpacaAssets(key, secret, os.environ.get("SURGERADAR_ASSET_ENVIRONMENT", "paper"))
+            if any(row["access"] == "rate_limited" for row in statuses):
+                asset_status = {"access": "not_attempted", "http_status": None, "reason": "stopped_after_rate_limit"}
+            else:
+                asset_status, assets = probe_assets(asset_provider)
+            asset_status["endpoint"] = asset_provider.endpoint
+            common_count = sum(classify(symbol, metadata)["classification"] == "common_stock_verified"
+                               for symbol, metadata in assets.items())
+            log.emit("asset_check", feed="asset_master", api_version="v2", asset_metadata=asset_status,
+                     common_stock_verified_count=common_count,
+                     common_stock_filtering_usable=asset_status["access"] == "accessible" and common_count > 0)
+            if mode == "asset-check":
+                return 0 if asset_status["access"] == "accessible" else 4
             log.context["entitlement"] = ("screener_access_verified" if any(row["access"] == "accessible" for row in statuses)
                                           else "forbidden" if all(row["access"] == "forbidden" for row in statuses)
                                           else "unverified")
         blocked_by_rate_limit = any(row["access"] == "rate_limited" for row in statuses)
+        blocked_by_rate_limit = blocked_by_rate_limit or asset_status["access"] == "rate_limited"
         available = any(sources.values()) and not blocked_by_rate_limit
-        log.emit("universe_check", discovery_available=available and not bool(fixture),
-                 discovery_enabled=available and not bool(fixture) and os.environ.get("SURGERADAR_DISCOVERY_ENABLED") == "true",
+        filtering_usable = available and bool(select(sources, config, assets))
+        log.emit("universe_check", discovery_available=filtering_usable and not bool(fixture),
+                 discovery_enabled=filtering_usable and not bool(fixture) and os.environ.get("SURGERADAR_DISCOVERY_ENABLED") == "true",
                  access_verified=not bool(fixture) and any(row["access"] == "accessible" for row in statuses),
                  reason="fixture_only" if fixture else "sources_available" if available else "no_usable_source",
-                 sources=statuses)
+                 sources=statuses, asset_metadata=asset_status,
+                 common_stock_filtering_usable=filtering_usable)
         if mode == "universe-check":
             return 0 if any(row["access"] == "accessible" for row in statuses) and not blocked_by_rate_limit else 4
         if not available:
             log.emit("universe_disabled", discovery_enabled=False, reason="no_usable_source")
             return 4
-        selected = select(sources, config, assets)
+        filtered = filtered_universe(sources, config, assets)
+        selected = filtered.pop("candidates")
         log.emit("universe", generated_at=datetime.now(timezone.utc).isoformat(), universe_version=UNIVERSE_VERSION,
                  symbols=[item["symbol"] for item in selected], count=len(selected), candidates=selected,
                  config={"mover_weight": config.mover_weight, "active_weight": config.active_weight,
                          "limit": config.limit, "score_formula": "mover_weight/mover_rank + active_weight/active_rank"},
-                 fixture_only=bool(fixture), discovery_enabled=not bool(fixture), monitoring_feed="iex")
-        return 0 if selected else 5
+                 fixture_only=bool(fixture), discovery_enabled=not bool(fixture) and bool(selected), monitoring_feed="iex",
+                 asset_metadata=asset_status, **filtered)
+        return 0 if selected else 4 if asset_status["access"] not in ("accessible", "fixture_only") else 5
     except (OSError, ValueError, TypeError, AttributeError):
         log.emit("universe_error", reason="invalid_fixture_or_selection_config", discovery_enabled=False)
         return 2

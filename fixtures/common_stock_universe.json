@@ -1,0 +1,292 @@
+{
+  "actives": {
+    "most_actives": [
+      {
+        "symbol": "AAPL",
+        "volume": 20000,
+        "trade_count": 10
+      },
+      {
+        "symbol": "MSFT",
+        "volume": 19900,
+        "trade_count": 10
+      },
+      {
+        "symbol": "VEEAW",
+        "volume": 19800,
+        "trade_count": 10
+      },
+      {
+        "symbol": "ARBEW",
+        "volume": 19700,
+        "trade_count": 10
+      },
+      {
+        "symbol": "ASTLW",
+        "volume": 19600,
+        "trade_count": 10
+      },
+      {
+        "symbol": "PNAQ.RT",
+        "volume": 19500,
+        "trade_count": 10
+      },
+      {
+        "symbol": "PACK.U",
+        "volume": 19400,
+        "trade_count": 10
+      },
+      {
+        "symbol": "HYG",
+        "volume": 19300,
+        "trade_count": 10
+      },
+      {
+        "symbol": "SOXS",
+        "volume": 19200,
+        "trade_count": 10
+      },
+      {
+        "symbol": "TLT",
+        "volume": 19100,
+        "trade_count": 10
+      },
+      {
+        "symbol": "INACTIVE",
+        "volume": 19000,
+        "trade_count": 10
+      },
+      {
+        "symbol": "NOTRADE",
+        "volume": 18900,
+        "trade_count": 10
+      },
+      {
+        "symbol": "CRYPTO",
+        "volume": 18800,
+        "trade_count": 10
+      },
+      {
+        "symbol": "UNKNOWN",
+        "volume": 18700,
+        "trade_count": 10
+      },
+      {
+        "symbol": "MISSING",
+        "volume": 18600,
+        "trade_count": 10
+      }
+    ],
+    "last_updated": "2026-10-02T14:30:00Z"
+  },
+  "movers": {
+    "gainers": [
+      {
+        "symbol": "AAPL",
+        "percent_change": 20,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "MSFT",
+        "percent_change": 19,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "VEEAW",
+        "percent_change": 18,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "ARBEW",
+        "percent_change": 17,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "ASTLW",
+        "percent_change": 16,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "PNAQ.RT",
+        "percent_change": 15,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "PACK.U",
+        "percent_change": 14,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "HYG",
+        "percent_change": 13,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "SOXS",
+        "percent_change": 12,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "TLT",
+        "percent_change": 11,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "INACTIVE",
+        "percent_change": 10,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "NOTRADE",
+        "percent_change": 9,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "CRYPTO",
+        "percent_change": 8,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "UNKNOWN",
+        "percent_change": 7,
+        "change": 1,
+        "price": 10
+      },
+      {
+        "symbol": "MISSING",
+        "percent_change": 6,
+        "change": 1,
+        "price": 10
+      }
+    ],
+    "losers": [],
+    "market_type": "stocks"
+  },
+  "assets": {
+    "AAPL": {
+      "symbol": "AAPL",
+      "name": "Apple Inc. Common Stock",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "MSFT": {
+      "symbol": "MSFT",
+      "name": "Microsoft Corporation Common Stock",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "VEEAW": {
+      "symbol": "VEEAW",
+      "name": "Veea Inc. Warrants",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "ARBEW": {
+      "symbol": "ARBEW",
+      "name": "Arbe Robotics Ltd. Warrants",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "ASTLW": {
+      "symbol": "ASTLW",
+      "name": "Algoma Steel Group Inc. Warrants",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "PNAQ.RT": {
+      "symbol": "PNAQ.RT",
+      "name": "Synthetic Acquisition Rights",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "PACK.U": {
+      "symbol": "PACK.U",
+      "name": "Synthetic Acquisition Units",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "HYG": {
+      "symbol": "HYG",
+      "name": "iShares iBoxx High Yield Corporate Bond ETF",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "SOXS": {
+      "symbol": "SOXS",
+      "name": "Direxion Daily Semiconductor Bear 3X Shares",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "TLT": {
+      "symbol": "TLT",
+      "name": "iShares 20+ Year Treasury Bond ETF",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "INACTIVE": {
+      "symbol": "INACTIVE",
+      "name": "Synthetic Inactive Common Stock",
+      "class": "us_equity",
+      "status": "inactive",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    },
+    "NOTRADE": {
+      "symbol": "NOTRADE",
+      "name": "Synthetic Untradable Common Stock",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": false,
+      "exchange": "NASDAQ"
+    },
+    "CRYPTO": {
+      "symbol": "CRYPTO",
+      "name": "Synthetic Common Stock",
+      "class": "crypto",
+      "status": "active",
+      "tradable": true,
+      "exchange": "CRYPTO"
+    },
+    "UNKNOWN": {
+      "symbol": "UNKNOWN",
+      "name": "Synthetic Holdings",
+      "class": "us_equity",
+      "status": "active",
+      "tradable": true,
+      "exchange": "NASDAQ"
+    }
+  }
+}
