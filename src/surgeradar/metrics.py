@@ -28,6 +28,7 @@ class Metrics:
         self.overflow = self.reconnects = self.disconnects = 0
         self.last_event_at = self.last_received_at = None
         self.minutes: dict[str, tuple[int, set[str]]] = {}
+        self.live_detector = None
         import psutil
         self.process = psutil.Process()
         self.process.cpu_percent()  # establish interval baseline
@@ -66,7 +67,8 @@ class Metrics:
                  queue_overflows=self.overflow, reconnects=self.reconnects,
                  disconnects=self.disconnects,
                  cpu_percent=self.process.cpu_percent(),
-                 rss_bytes=self.process.memory_info().rss)
+                 rss_bytes=self.process.memory_info().rss,
+                 **(self.live_detector.summary() if self.live_detector else {}))
         self.previous_messages, self.previous_bars = self.messages, self.bars
         self.last_report = now
         # Latest event minute is provisional: arrivals can straddle report boundaries.

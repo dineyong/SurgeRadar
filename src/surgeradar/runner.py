@@ -96,6 +96,8 @@ async def stream(socket, metrics, log, config, deadline, *, log_bars):
                     metrics.malformed += 1
                     continue
                 metrics.observe(bar)
+                if metrics.live_detector is not None:
+                    metrics.live_detector.observe(bar)
                 if log_bars:
                     log.emit("minute_bar", ticker=bar.ticker,
                              event_at=bar.event_at, received_at=bar.received_at,
@@ -138,6 +140,9 @@ async def run(config: Config, provider: Provider, log, mode: str) -> int:
         return 2
     from websockets.exceptions import ConnectionClosed, InvalidHandshake
     metrics = Metrics()
+    if mode == "live-detect":
+        from .live_detector import LiveDetector
+        metrics.live_detector = LiveDetector(log)
     symbols = ("*",) if mode == "broad" else config.symbols
     deadline = time.monotonic() + config.duration
     attempts = 0
@@ -165,6 +170,8 @@ async def run(config: Config, provider: Provider, log, mode: str) -> int:
                     await stream(socket, metrics, log, config, deadline,
                                  log_bars=mode == "smoke")
                     result = 0 if metrics.bars and not metrics.overflow else 5
+                    if metrics.live_detector and metrics.live_detector.detector_errors:
+                        result = 3
                     break
             except ProviderError as exc:
                 if exc.code == 409:
@@ -176,6 +183,8 @@ async def run(config: Config, provider: Provider, log, mode: str) -> int:
                     result = 4 if exc.code == 409 else 3
                     break
                 metrics.disconnects += 1
+                if metrics.live_detector:
+                    metrics.live_detector.discontinuity()
                 log.emit("disconnected", reason=exc.reason)
             except DiagnosticError as exc:
                 log.emit("diagnostic_failed", reason=str(exc))
@@ -183,6 +192,8 @@ async def run(config: Config, provider: Provider, log, mode: str) -> int:
                 break
             except (OSError, ConnectionClosed, InvalidHandshake, TimeoutError) as exc:
                 metrics.disconnects += 1
+                if metrics.live_detector:
+                    metrics.live_detector.discontinuity()
                 log.emit("disconnected", error_type=type(exc).__name__,
                          reason="transport_or_handshake_timeout")
             if attempts >= config.max_reconnects or time.monotonic() >= deadline:
@@ -194,9 +205,11 @@ async def run(config: Config, provider: Provider, log, mode: str) -> int:
             log.emit("reconnect_scheduled", attempt=attempts, delay_seconds=delay)
             await asyncio.sleep(delay)
         if mode != "check":
-            log.emit("smoke_result", bars_observed=metrics.bars,
+            log.emit("live_detect_result" if mode == "live-detect" else "smoke_result", bars_observed=metrics.bars,
                      status="bars_observed" if result == 0 else "incomplete_or_no_bars",
-                     continuous=metrics.disconnects == 0 and metrics.overflow == 0,
+                     continuous=metrics.disconnects == 0 and metrics.overflow == 0 and
+                     (metrics.live_detector is None or
+                      (metrics.live_detector.history_gaps == 0 and metrics.live_detector.detector_errors == 0)),
                      broad_capacity_verified=False)
         return result
     finally:

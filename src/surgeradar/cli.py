@@ -9,8 +9,8 @@ from .runner import run
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Alpaca ingestion diagnostics and offline detector replay")
-    parser.add_argument("mode", choices=("check", "smoke", "broad", "replay"),
-                        help="selected-feed check, small symbols, or SIP-only all-symbol benchmark")
+    parser.add_argument("mode", choices=("check", "smoke", "broad", "replay", "live-detect"),
+                        help="feed diagnostics, offline replay, or live minute-bar detector")
     parser.add_argument("fixture", nargs="?", help="local JSONL fixture for replay")
     parser.add_argument("--config", help="JSON detector threshold overrides for replay")
     args = parser.parse_args(argv)

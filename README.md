@@ -1,11 +1,65 @@
-# SurgeRadar V0.2
+# SurgeRadar V0.3
 
 Issues [#2](https://github.com/dineyong/SurgeRadar/issues/2) and
 [#3](https://github.com/dineyong/SurgeRadar/issues/3): validate explicitly selected
 Alpaca IEX or SIP entitlement and minute-bar ingestion in one Python process.
 Issue [#4](https://github.com/dineyong/SurgeRadar/issues/4) adds an independent
-detector core and offline replay. The live ingestion runner does not invoke it.
+detector core and offline replay. Issue [#5](https://github.com/dineyong/SurgeRadar/issues/5)
+connects that same Detector to live minute bars only in `live-detect` mode.
 No relative-volume baseline, database, alerts, post-signal tracking or trading code.
+
+## Live IEX detector validation
+
+From the repository root, using the existing environment credentials
+`APCA_API_KEY_ID` and `APCA_API_SECRET_KEY`, run during US market hours:
+
+```powershell
+$env:SURGERADAR_FEED = 'iex'
+$env:SURGERADAR_SYMBOLS = 'SPY,QQQ,AAPL,MSFT,NVDA,AMD,TSLA,AMZN,META,GOOGL'
+$env:SURGERADAR_DURATION_SECONDS = '1800'
+$env:SURGERADAR_REPORT_SECONDS = '10'
+.\.venv\Scripts\python.exe -m surgeradar live-detect
+```
+
+This ten-symbol starter set is a configurable pipeline test example.
+Basic/IEX accepts at most 30 explicit symbols and never wildcard or full-market
+scanning. Environment variables must be set in this shell; `.env` is not loaded.
+Use the credential prompts in Configure explicitly below if starting a new shell.
+The default 180-second duration is usually too short to warm up six consecutive
+minute bars; the example allows 30 minutes. A symbol with no-trade/missing minutes
+must warm up again. Ctrl+C stops the run.
+
+`live-detect` uses the existing Alpaca connection, normalization and bounded queue.
+It feeds normalized MinuteBar objects into the same `Detector.evaluate()` as
+offline replay, with the default thresholds and `v0.1-no-rvol` version.
+`check`, `smoke`, `broad` and offline replay retain their previous behavior.
+
+Candidates and detections emit `live_candidate_rejection` and `live_detection`
+JSON events with provider/feed/coverage_class, symbol, feature_at, detected_price,
+detector_version, full config, features, predicates and failed_predicates.
+They also contain received_at, processed_at and receive_lag_seconds (receive time
+minus the provider minute end). Lag is diagnostic; no new freshness threshold
+or profitability assertion is introduced. Non-candidates are not printed as
+individual evaluations, but all successfully evaluated bars are counted.
+
+Periodic/final summaries include bars_evaluated, candidates, detections,
+candidate_rejections, symbols_with_detector_state and detector_errors, plus
+existing reconnects/disconnects, history_gaps, stream_discontinuities and
+detector_continuity. These are cumulative snapshots, not increments to sum.
+Each symbol's missing-minute gap resets its core history. A stream disconnect
+clears all detector histories before reconnecting, even when subsequent event
+timestamps appear contiguous; no replay/backfill is attempted. Resets and gaps
+are also logged. Counts remain cumulative across reconnects. "No observed
+discontinuity" does not prove full data coverage.
+
+Duplicate/out-of-order bars are rejected by the core and logged/counted as
+detector_errors, without re-evaluating or emitting a duplicate detection.
+Unexpected evaluation failures clear the affected symbol's history and expose
+only a safe error type/reason. Evaluation continues for diagnostics; a run with
+detector errors returns exit 3. Receipt of valid bars with no errors returns 0
+even when no surge is detected; no valid bars returns 5. Final run status uses
+`live_detect_result`. IEX detection is a prototype signal based on one exchange,
+not production full-market validation. IEX volume is not consolidated volume.
 
 ## Offline detector replay
 

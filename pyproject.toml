@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "surgeradar"
-version = "0.2.0"
-description = "Alpaca minute-bar diagnostics and deterministic offline surge replay"
+version = "0.3.0"
+description = "Alpaca minute-bar diagnostics, offline replay and live surge detector"
 requires-python = ">=3.11"
 dependencies = ["websockets>=15,<18", "psutil>=5.9,<8"]
 
