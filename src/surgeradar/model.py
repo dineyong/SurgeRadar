@@ -62,12 +62,18 @@ class MinuteBar:
     feed: str = "sip"
 
     @property
+    def coverage_class(self):
+        return "single_exchange_iex" if self.feed == "iex" else "consolidated_sip"
+
+    @property
     def lag_seconds(self) -> float:
         # A completed minute bar normally arrives after its end, not its start.
         return (self.received_at - self.event_at - timedelta(minutes=1)).total_seconds()
 
 
-def normalize_bar(item: Any, received_at: datetime) -> MinuteBar:
+def normalize_bar(item: Any, received_at: datetime, *, feed: str = "sip") -> MinuteBar:
+    if feed not in ("iex", "sip"):
+        raise Malformed("invalid_feed")
     if not isinstance(item, dict) or item.get("T") != "b":
         raise Malformed("not_minute_bar")
     symbol = item.get("S")
@@ -87,4 +93,5 @@ def normalize_bar(item: Any, received_at: datetime) -> MinuteBar:
     if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 0):
         raise Malformed("invalid_trade_count")
     return MinuteBar(symbol, start, received_at.astimezone(timezone.utc),
-                     o, h, low, c, number(item, "v"), number(item, "vw", optional=True), n)
+                     o, h, low, c, number(item, "v"), number(item, "vw", optional=True), n,
+                     feed=feed)

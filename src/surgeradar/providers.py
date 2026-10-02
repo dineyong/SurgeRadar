@@ -26,7 +26,7 @@ class Alpaca:
         # Never let library debug logging emit the authentication frame.
         logger = logging.getLogger("surgeradar.websocket")
         logger.disabled = True
-        return connect("wss://stream.data.alpaca.markets/v2/sip",
+        return connect(f"wss://stream.data.alpaca.markets/v2/{self.config.feed}",
                        open_timeout=10, close_timeout=2,
                        ping_interval=20, ping_timeout=20,
                        max_queue=16, max_size=4 * 1024 * 1024, logger=logger)
@@ -35,6 +35,9 @@ class Alpaca:
         return json.dumps({"action": "auth", "key": self.config.key, "secret": self.config.secret})
 
     def subscription(self, symbols: tuple[str, ...]) -> str:
+        if self.config.feed == "iex" and (not symbols or "*" in symbols or len(symbols) > 30):
+            from .config import ConfigError
+            raise ConfigError("Basic/IEX requires 1-30 explicit symbols; wildcard is not supported")
         return json.dumps({"action": "subscribe", "bars": list(symbols)})
 
 

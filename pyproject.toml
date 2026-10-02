@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "surgeradar"
-version = "0.1.0"
-description = "Alpaca SIP minute-bar ingestion diagnostics"
+version = "0.1.1"
+description = "Alpaca IEX/SIP minute-bar ingestion diagnostics"
 requires-python = ">=3.11"
 dependencies = ["websockets>=15,<18", "psutil>=5.9,<8"]
 

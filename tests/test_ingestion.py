@@ -23,6 +23,12 @@ ENV = {"SURGERADAR_FEED": "sip", "APCA_API_KEY_ID": "fake-key",
 
 
 class ParsingTests(unittest.TestCase):
+    def test_iex_normalization_retains_feed_and_coverage(self):
+        bar = normalize_bar(BAR, datetime.now(timezone.utc), feed="iex")
+        self.assertEqual(bar.feed, "iex")
+        self.assertEqual(bar.coverage_class, "single_exchange_iex")
+        self.assertEqual(bar.provider, "alpaca")
+
     def test_normalization_and_end_lag(self):
         bar = normalize_bar(BAR, datetime(2026, 10, 1, 14, 31, 2, tzinfo=timezone.utc))
         self.assertEqual(bar.close, Decimal("101"))
@@ -71,7 +77,7 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("fake-secret", repr(config))
 
     def test_reject_feed_without_fallback(self):
-        for feed in ("", "iex", "delayed_sip", "test", "unknown"):
+        for feed in ("", "delayed_sip", "test", "unknown"):
             with self.subTest(feed=feed), self.assertRaises(ConfigError):
                 Config.from_env({**ENV, "SURGERADAR_FEED": feed})
 
@@ -79,6 +85,45 @@ class ConfigTests(unittest.TestCase):
         for key in ("APCA_API_KEY_ID", "APCA_API_SECRET_KEY"):
             with self.subTest(key=key), self.assertRaises(ConfigError):
                 Config.from_env({**ENV, key: ""})
+
+    def test_iex_config_default_symbols(self):
+        config = Config.from_env({**ENV, "SURGERADAR_FEED": "iex"})
+        self.assertEqual(config.feed, "iex")
+        self.assertEqual(config.symbols, ("SPY", "AAPL", "MSFT"))
+        self.assertEqual(config.coverage_class, "single_exchange_iex")
+
+    def test_iex_symbol_boundaries(self):
+        symbols = [f"S{i}" for i in range(31)]
+        for count in (1, 30):
+            config = Config.from_env({**ENV, "SURGERADAR_FEED": "iex",
+                                      "SURGERADAR_SYMBOLS": ",".join(symbols[:count])})
+            self.assertEqual(len(config.symbols), count)
+        with self.assertRaises(ConfigError):
+            Config.from_env({**ENV, "SURGERADAR_FEED": "iex",
+                             "SURGERADAR_SYMBOLS": ",".join(symbols)})
+        self.assertEqual(len(Config.from_env({**ENV, "SURGERADAR_SYMBOLS": ",".join(symbols)}).symbols), 31)
+
+    def test_provider_rejects_iex_wildcard_and_large_list(self):
+        provider = Alpaca(Config("key", "secret", feed="iex"))
+        for symbols in (("*",), tuple(f"S{i}" for i in range(31))):
+            with self.assertRaises(ConfigError):
+                provider.subscription(symbols)
+
+    def test_explicit_endpoint_selection(self):
+        for feed in ("iex", "sip"):
+            with patch("websockets.asyncio.client.connect") as connect:
+                Alpaca(Config("key", "secret", feed=feed)).open()
+                self.assertEqual(connect.call_args.args[0], f"wss://stream.data.alpaca.markets/v2/{feed}")
+                self.assertEqual(connect.call_count, 1)
+
+    def test_cli_iex_broad_blocks_before_connection_without_credentials(self):
+        with patch.dict(os.environ, {"SURGERADAR_FEED": "iex"}, clear=True), \
+                patch("sys.stdout", new_callable=io.StringIO) as output, patch.object(Alpaca, "open") as opened:
+            self.assertEqual(main(["broad"]), 2)
+            opened.assert_not_called()
+            row = json.loads(output.getvalue())
+            self.assertIn("not supported on Basic/IEX", row["reason"])
+            self.assertEqual(row["feed"], "iex")
 
     def test_numeric_validation(self):
         for key, value in (("SURGERADAR_DURATION_SECONDS", "NaN"),
@@ -184,6 +229,47 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(config.secret, output.getvalue())
         return result, rows, socket, provider
 
+    async def test_iex_smoke_labels_every_record_and_metrics(self):
+        result, rows, socket, _ = await self.execute(controls() + [[BAR]], feed="iex")
+        self.assertEqual(result, 0)
+        self.assertEqual(socket.sent[-1]["bars"], ["SPY", "AAPL", "MSFT"])
+        for row in rows:
+            self.assertEqual(row["provider"], "alpaca")
+            self.assertEqual(row["feed"], "iex")
+            self.assertEqual(row["coverage_class"], "single_exchange_iex")
+            self.assertEqual(row["requested_symbol_count"], 3)
+            self.assertIn("max_30_symbols", row["limitations"])
+            self.assertIn("entitlement", row)
+        self.assertFalse(any(r["event"] == "sip_entitlement_verified" for r in rows))
+        self.assertTrue(any(r["event"] == "iex_entitlement_verified" for r in rows))
+
+    async def test_iex_check_verifies_selected_feed(self):
+        result, rows, _, _ = await self.execute(controls(), mode="check", feed="iex")
+        self.assertEqual(result, 0)
+        row = next(r for r in rows if r["event"] == "check_complete")
+        self.assertTrue(row["selected_feed_entitled"])
+        self.assertIsNone(row["sip_entitled"])
+
+    async def test_iex_broad_never_opens(self):
+        result, rows, socket, provider = await self.execute([], mode="broad", feed="iex")
+        self.assertEqual(result, 2)
+        self.assertEqual(provider.opens, 0)
+        self.assertEqual(socket.sent, [])
+
+    async def test_iex_denial_never_switches_to_sip(self):
+        result, rows, socket, provider = await self.execute(
+            [controls()[0], [{"T": "error", "code": 409}]], feed="iex", max_reconnects=3)
+        self.assertEqual(result, 4)
+        self.assertEqual(provider.opens, 1)
+        self.assertEqual(len(socket.sent), 1)
+        self.assertTrue(all(r["feed"] == "iex" for r in rows))
+
+    async def test_sip_logs_preserve_coverage(self):
+        result, rows, _, _ = await self.execute(controls(), mode="check")
+        self.assertEqual(result, 0)
+        self.assertTrue(all(r["coverage_class"] == "consolidated_sip" for r in rows))
+        self.assertTrue(next(r for r in rows if r["event"] == "check_complete")["sip_entitled"])
+
     async def test_check_auth_and_subscription_order(self):
         result, rows, socket, _ = await self.execute(controls(), mode="check")
         self.assertEqual(result, 0)
@@ -277,7 +363,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(metrics.overflow, 0)
         self.assertIn("queue_overflow", output.getvalue())
 
-    async def test_loopback_websocket_protocol(self):
+    async def test_loopback_websocket_protocol(self, feed="sip"):
         from websockets.asyncio.server import serve
         from websockets.asyncio.client import connect
 
@@ -292,7 +378,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             await socket.send(json.dumps([BAR]))
             await socket.wait_closed()
 
-        config = Config("fake-key", "fake-secret", duration=.15, report_seconds=.05)
+        config = Config("fake-key", "fake-secret", feed=feed, duration=.15, report_seconds=.05)
         async with serve(server, "127.0.0.1", 0) as ws_server:
             port = ws_server.sockets[0].getsockname()[1]
 
@@ -303,6 +389,11 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             output = io.StringIO()
             result = await run(config, LoopbackProvider(config), JsonLog(output), "smoke")
         self.assertEqual(result, 0)
+        rows = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertTrue(all(row["feed"] == feed for row in rows))
+
+    async def test_iex_loopback_websocket_protocol(self):
+        await self.test_loopback_websocket_protocol(feed="iex")
 
 
 if __name__ == "__main__":

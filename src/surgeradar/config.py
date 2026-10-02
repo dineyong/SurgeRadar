@@ -40,11 +40,27 @@ class Config:
     queue_size: int = 256
     max_reconnects: int = 3
 
+    def __post_init__(self):
+        if self.feed not in ("iex", "sip"):
+            raise ConfigError("SURGERADAR_FEED must explicitly be iex or sip; no fallback")
+        if self.feed == "iex" and (not self.symbols or "*" in self.symbols or len(self.symbols) > 30):
+            raise ConfigError("Basic/IEX requires 1-30 explicit symbols; wildcard is not supported")
+
+    @property
+    def coverage_class(self):
+        return "single_exchange_iex" if self.feed == "iex" else "consolidated_sip"
+
+    @property
+    def limitations(self):
+        return (["iex_only", "not_consolidated_volume", "max_30_symbols", "no_wildcard"]
+                if self.feed == "iex" else ["requires_sip_entitlement"])
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
         env = os.environ if env is None else env
-        if env.get("SURGERADAR_FEED", "").strip() != "sip":
-            raise ConfigError("SURGERADAR_FEED must explicitly be sip; no IEX/delayed fallback")
+        feed = env.get("SURGERADAR_FEED", "").strip()
+        if feed not in ("iex", "sip"):
+            raise ConfigError("SURGERADAR_FEED must explicitly be iex or sip; no fallback")
         key = env.get("APCA_API_KEY_ID", "").strip()
         secret = env.get("APCA_API_SECRET_KEY", "").strip()
         if not key or not secret:
@@ -56,7 +72,7 @@ class Config:
         ))
         if not symbols or any(not re.fullmatch(r"[A-Z][A-Z0-9./-]{0,19}", s) for s in symbols):
             raise ConfigError("SURGERADAR_SYMBOLS must contain explicit stock symbols; use broad for wildcard")
-        return cls(key, secret, symbols=symbols,
+        return cls(key, secret, feed=feed, symbols=symbols,
                    duration=positive_number(env, "SURGERADAR_DURATION_SECONDS", 180),
                    report_seconds=positive_number(env, "SURGERADAR_REPORT_SECONDS", 10),
                    queue_size=integer(env, "SURGERADAR_QUEUE_SIZE", 256, 1),

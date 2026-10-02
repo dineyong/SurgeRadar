@@ -43,7 +43,10 @@ async def handshake(socket, provider, symbols, log, metrics):
     log.emit("connected")
     await socket.send(provider.authentication())
     await wait_for("success", "authenticated")
-    log.emit("sip_entitlement_verified", evidence="authenticated_on_v2_sip")
+    feed = log.context["feed"]
+    log.context["entitlement"] = "authenticated"
+    log.emit("sip_entitlement_verified" if feed == "sip" else "iex_entitlement_verified",
+             evidence=f"authenticated_on_v2_{feed}")
     await socket.send(provider.subscription(symbols))
     acknowledgement = await wait_for("subscription")
     ack = acknowledgement.get("bars")
@@ -88,7 +91,7 @@ async def stream(socket, metrics, log, config, deadline, *, log_bars):
                     metrics.ignored += 1
                     continue
                 try:
-                    bar = normalize_bar(item, received)
+                    bar = normalize_bar(item, received, feed=config.feed)
                 except Malformed:
                     metrics.malformed += 1
                     continue
@@ -129,6 +132,10 @@ async def stream(socket, metrics, log, config, deadline, *, log_bars):
 
 
 async def run(config: Config, provider: Provider, log, mode: str) -> int:
+    log.configure(config, mode)
+    if mode == "broad" and config.feed == "iex":
+        log.emit("configuration_blocked", mode=mode, reason="broad not supported on Basic/IEX")
+        return 2
     from websockets.exceptions import ConnectionClosed, InvalidHandshake
     metrics = Metrics()
     symbols = ("*",) if mode == "broad" else config.symbols
@@ -151,7 +158,8 @@ async def run(config: Config, provider: Provider, log, mode: str) -> int:
                                  continuity="not_verified_no_backfill_in_v0_1")
                     if mode == "check":
                         result = 0
-                        log.emit("check_complete", sip_entitled=True,
+                        log.emit("check_complete", sip_entitled=True if config.feed == "sip" else None,
+                                 selected_feed_entitled=True,
                                  ingestion_verified=False)
                         break
                     await stream(socket, metrics, log, config, deadline,
@@ -159,8 +167,11 @@ async def run(config: Config, provider: Provider, log, mode: str) -> int:
                     result = 0 if metrics.bars and not metrics.overflow else 5
                     break
             except ProviderError as exc:
-                log.emit("provider_error", code=exc.code, reason=exc.reason,
-                         sip_entitled=False if exc.code == 409 else None)
+                if exc.code == 409:
+                    log.context["entitlement"] = "denied"
+                log.emit("provider_error", code=exc.code,
+                         reason="iex_not_entitled" if exc.code == 409 and config.feed == "iex" else exc.reason,
+                         sip_entitled=False if exc.code == 409 and config.feed == "sip" else None)
                 if not exc.retryable:
                     result = 4 if exc.code == 409 else 3
                     break

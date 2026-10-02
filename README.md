@@ -1,7 +1,8 @@
-# SurgeRadar V0.1
+# SurgeRadar V0.1a
 
-Issue [#2](https://github.com/dineyong/SurgeRadar/issues/2) only: validate
-Alpaca SIP entitlement and minute-bar ingestion in one Python process.
+Issues [#2](https://github.com/dineyong/SurgeRadar/issues/2) and
+[#3](https://github.com/dineyong/SurgeRadar/issues/3): validate explicitly selected
+Alpaca IEX or SIP entitlement and minute-bar ingestion in one Python process.
 No detector, baseline, database, alerts, post-signal tracking or trading code.
 
 ## Install
@@ -28,7 +29,7 @@ No subscription purchase or account modification is performed.
 PowerShell, with prompts (the secret prompt is hidden):
 
 ```powershell
-$env:SURGERADAR_FEED = 'sip'
+$env:SURGERADAR_FEED = 'iex'
 $env:APCA_API_KEY_ID = Read-Host 'Alpaca key ID'
 $credentialInput = Read-Host 'Alpaca secret key' -AsSecureString
 $env:APCA_API_SECRET_KEY = [System.Net.NetworkCredential]::new('', $credentialInput).Password
@@ -44,32 +45,43 @@ Remove-Item Env:APCA_API_KEY_ID, Env:APCA_API_SECRET_KEY -ErrorAction SilentlyCo
 Remove-Variable credentialInput -ErrorAction SilentlyContinue
 ```
 
-`SURGERADAR_FEED=sip` is required. IEX, delayed_sip and test feeds are intentionally
-rejected before connection; there is no fallback. The sole network endpoint is
-`wss://stream.data.alpaca.markets/v2/sip`. Config/credentials and raw upstream
+`SURGERADAR_FEED=iex` or `SURGERADAR_FEED=sip` is required; no default feed or
+silent fallback is used. Other feeds are rejected before connection. The selected
+endpoint is `wss://stream.data.alpaca.markets/v2/iex` or `/v2/sip`. Config/credentials and raw upstream
 messages or exception text are never logged. websocket library logging is disabled
 to prevent authentication-frame logging.
 
 | Variable | Default / meaning |
 |---|---|
 | APCA_API_KEY_ID / APCA_API_SECRET_KEY | required, not printed |
-| SURGERADAR_FEED | required: sip |
+| SURGERADAR_FEED | required: iex or sip; example uses free Basic/IEX |
 | SURGERADAR_SYMBOLS | SPY,AAPL,MSFT; comma-separated, wildcard rejected here |
 | SURGERADAR_DURATION_SECONDS | 180; positive, connection/retries included |
 | SURGERADAR_REPORT_SECONDS | 10; periodic metrics |
 | SURGERADAR_QUEUE_SIZE | 256 inbound frames, bounded; no infinite capacity |
 | SURGERADAR_MAX_RECONNECTS | 3 retries after initial connection; 0 disables |
 
+Basic is free and provides real-time IEX data with a 30-symbol WebSocket limit.
+IEX mode requires 1–30 distinct explicit symbols; wildcard and larger lists fail
+before connection. The default small liquid set is SPY,AAPL,MSFT.
+IEX is **not the full US market**, and IEX volume is **not consolidated market
+volume**. These runs are suitable for pipeline/algorithm prototyping, not for
+validating production-quality full-market surge detection. Any future detector
+results must remain separated by provider/feed/version from SIP results. The
+runner labels both normalized bars and all JSON diagnostics with the selected feed.
+
 ## Run the three diagnostics
 
 ```powershell
-# Authentication on SIP, then verify requested bars subscription acknowledgement.
+# Authentication on the explicitly selected feed, then verify bars ACK.
 .\.venv\Scripts\surgeradar.exe check
 
 # Small liquid symbol set; log each valid normalized bar.
 .\.venv\Scripts\surgeradar.exe smoke
 
 # Whole US stock feed via bars=["*"]; aggregate logs to reduce stdout overhead.
+# SIP only; explicitly select SIP and provide entitled credentials to use broad.
+$env:SURGERADAR_FEED = 'sip'
 $env:SURGERADAR_DURATION_SECONDS = '300'
 .\.venv\Scripts\surgeradar.exe broad
 ```
@@ -79,7 +91,7 @@ Inspect `$LASTEXITCODE` immediately after the command. Ctrl+C stops the runner.
 PowerShell can save stdout via `| Tee-Object -FilePath logs/broad.jsonl` after creating
 the ignored `logs` directory; logging throughput can affect this benchmark.
 
-**check** confirms authentication on the exact SIP endpoint and bars ACK;
+**check** confirms authentication on the exact selected endpoint and bars ACK;
 it does not assert receipt of actual market data. Code 409 reports
 `sip_not_entitled` with `sip_entitled=false` and stops. Code 402 is
 `credentials_rejected`, not evidence of missing SIP rights. Code 406 reports
@@ -91,19 +103,27 @@ unverified, not as entitled or a reason to substitute another feed.
 Outside trading hours, a healthy authenticated session may receive no bars and
 return 5. Inspect its timestamps; receipt alone does not prove that data is fresh.
 No test fixture is emitted by the diagnostic CLI. Fixtures and loopback WebSockets
-exist only in offline tests and **do not demonstrate real SIP entitlement**.
+exist only in offline tests and **do not demonstrate real feed entitlement**.
 
-**broad** implements the documented all-symbol subscription. Unlimited symbols is
+**broad** is SIP-only. With `feed=iex`, it returns exit 2 with
+`broad not supported on Basic/IEX` before opening a connection or sending wildcard.
+In SIP mode it implements the documented all-symbol subscription. Unlimited symbols is
 a provider entitlement, not a throughput guarantee. Wildcard ACK denial is explicit
 and stops. Whole-feed observations include stocks/ETFs beyond a NASDAQ/NYSE common
 stock universe; no universe selection/filtering is implemented in this issue.
 
 ## Diagnostics and benchmark interpretation
 
-JSON Lines include provider=alpaca, feed=sip, api_version=v2 and runner_version.
+Every JSON line, including failures, metrics and results, includes provider=alpaca,
+selected feed, coverage_class (`single_exchange_iex` or `consolidated_sip`),
+entitlement (`unverified`, `authenticated`, or `denied`), limitations,
+requested_symbol_count, api_version=v2 and runner_version.
+For SIP wildcard the symbol count is null because the universe size is unknown;
+symbol_scope is `all_symbols`, rather than misrepresenting wildcard as one symbol.
 Events include starting, connected, sip_entitlement_verified, subscription_ack,
 disconnected, reconnect_scheduled, reconnected, provider_error, queue_overflow,
-minute_bar (small mode), summary, event_minute and smoke_result.
+minute_bar (small mode), summary, event_minute and smoke_result. IEX authentication
+uses `iex_entitlement_verified`; it never claims SIP entitlement.
 
 - `frames_received`: WebSocket recv frames, including malformed/overflow frames.
   `messages_received`: decoded array entries, including controls, ignored and malformed
@@ -135,7 +155,7 @@ minute_bar (small mode), summary, event_minute and smoke_result.
   claim is made from these numbers.
 
 After a transport failure the runner reconnects with bounded exponential delay,
-reauthenticates and re-subscribes to the same SIP feed. Reconnects mark continuity
+reauthenticates and re-subscribes to the same selected feed. Reconnects mark continuity
 unverified; **no replay/backfill** is provided in V0.1. If retries exhaust, failure
 is returned even if earlier bars arrived. Backoff and shutdown are bounded;
 queue draining adds up to 2 seconds and connection close up to 2 seconds.
@@ -149,9 +169,9 @@ later detector quality gates.
 | Exit code | Meaning |
 |---|---|
 | 0 | check authenticated + ACK, or smoke/broad observed bars; see diagnostics |
-| 2 | configuration/credentials missing or unsafe feed selection |
+| 2 | invalid configuration/credentials, IEX >30 symbols, or IEX broad unsupported |
 | 3 | transport, credentials/protocol/queue failure or retry exhaustion |
-| 4 | SIP insufficient subscription (provider 409) |
+| 4 | selected-feed insufficient subscription (provider 409); no fallback |
 | 5 | no valid bars during smoke/broad; not verified |
 | 130 | interrupted by user |
 
@@ -167,7 +187,17 @@ APCA_API_SECRET_KEY. All three actual CLI modes therefore stopped at configurati
 validation with exit 2. **Real SIP entitlement, small-symbol live receipt and
 whole-market throughput remain unverified.** Supplying valid credentials with SIP
 access and running during a trading session is the next external validation step.
-No purchase was made.
+No purchase was made. Issue #3 adds offline IEX validation; actual IEX receipt
+still requires the owner's credentials and a session with trading on IEX.
+
+Exact IEX smoke command after installation and the credential prompts above:
+
+```powershell
+$env:SURGERADAR_FEED = 'iex'
+$env:SURGERADAR_SYMBOLS = 'SPY,AAPL,MSFT'
+$env:SURGERADAR_DURATION_SECONDS = '180'
+.\.venv\Scripts\python.exe -m surgeradar smoke
+```
 
 ## Official protocol references
 
