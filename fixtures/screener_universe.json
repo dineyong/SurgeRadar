@@ -1,0 +1,5 @@
+{
+  "actives": {"most_actives": [{"symbol": "AAA", "volume": 10000, "trade_count": 500}, {"symbol": "BBB", "volume": 20000, "trade_count": 1000}, {"symbol": "CCC", "volume": 5000, "trade_count": 200}], "last_updated": "2026-10-02T14:30:00Z"},
+  "movers": {"gainers": [{"symbol": "AAA", "percent_change": 10, "change": 1, "price": 11}, {"symbol": "CCC", "percent_change": 5, "change": 0.5, "price": 10.5}], "losers": [], "market_type": "stocks", "last_updated": "2026-10-02T14:30:00Z"},
+  "assets": {"AAA": {"class": "us_equity", "status": "active", "tradable": true}, "BBB": {"class": "us_equity", "status": "active", "tradable": true}, "CCC": {"class": "us_equity", "status": "active", "tradable": true}}
+}

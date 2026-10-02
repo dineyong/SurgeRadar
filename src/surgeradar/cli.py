@@ -9,11 +9,19 @@ from .runner import run
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Alpaca ingestion diagnostics and offline detector replay")
-    parser.add_argument("mode", choices=("check", "smoke", "broad", "replay", "live-detect"),
+    parser.add_argument("mode", choices=("check", "smoke", "broad", "replay", "live-detect", "universe-check", "universe"),
                         help="feed diagnostics, offline replay, or live minute-bar detector")
     parser.add_argument("fixture", nargs="?", help="local JSONL fixture for replay")
     parser.add_argument("--config", help="JSON detector threshold overrides for replay")
+    parser.add_argument("--universe-fixture", help="local JSON screener fixture; universe mode only")
     args = parser.parse_args(argv)
+    if args.mode in ("universe-check", "universe"):
+        if args.fixture or args.config or (args.mode == "universe-check" and args.universe_fixture):
+            parser.error("universe modes accept only --universe-fixture with universe")
+        from .universe import main as universe_main
+        return universe_main(args.mode, args.universe_fixture)
+    if args.universe_fixture:
+        parser.error("--universe-fixture is universe-only")
     if args.mode == "replay":
         if not args.fixture:
             parser.error("replay requires a local JSONL fixture")

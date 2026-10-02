@@ -1,4 +1,4 @@
-# SurgeRadar V0.3
+# SurgeRadar V0.4
 
 Issues [#2](https://github.com/dineyong/SurgeRadar/issues/2) and
 [#3](https://github.com/dineyong/SurgeRadar/issues/3): validate explicitly selected
@@ -7,6 +7,94 @@ Issue [#4](https://github.com/dineyong/SurgeRadar/issues/4) adds an independent
 detector core and offline replay. Issue [#5](https://github.com/dineyong/SurgeRadar/issues/5)
 connects that same Detector to live minute bars only in `live-detect` mode.
 No relative-volume baseline, database, alerts, post-signal tracking or trading code.
+
+## Free-plan universe access diagnostic and selection
+
+Issue [#6](https://github.com/dineyong/SurgeRadar/issues/6) adds a screener boundary
+and deterministic selector. Screener access is **not assumed** for Basic accounts.
+Discovery is disabled by default. This implementation environment has no API
+credentials, so actual current-account access remains unverified.
+
+Using existing APCA_API_KEY_ID / APCA_API_SECRET_KEY environment credentials,
+from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m surgeradar universe-check
+```
+
+No feed selection, paid plan or symbol list is required for this diagnostic.
+It sends at most one request each to most-actives (`top=100&by=volume`) and stock
+movers (`top=50`), with 10-second timeouts and no automatic retries. A 429 stops
+the remaining probe; no retry or selection occurs after that rate limit.
+Redirects are blocked to prevent forwarding credentials. Output exposes fixed
+endpoint URLs, HTTP status and access states: accessible, forbidden (403),
+credentials_rejected (401), rate_limited (429), http_error, transport_error,
+malformed_response or not_attempted. Numeric Retry-After seconds are reported
+without waiting. Error bodies, arbitrary headers, credentials and upstream
+exception text are never logged.
+
+`access_verified` describes valid HTTP-200 response access; an empty valid list
+verifies access but is not a usable discovery source. `discovery_available` means
+usable source data was found. `discovery_enabled` also requires the explicit
+enable variable below. Exit 0 means at least one well-formed accessible endpoint
+and no 429; 4 means no accessible endpoint or rate limit; 2 means missing/invalid
+credentials/configuration. HTTP status is the actual failure evidence; 403 alone
+does not prove a paid plan is the solution.
+
+Only after universe-check establishes that the current account has access:
+
+```powershell
+$env:SURGERADAR_DISCOVERY_ENABLED = 'true'
+$records = .\.venv\Scripts\python.exe -m surgeradar universe | ConvertFrom-Json
+if ($LASTEXITCODE -eq 0) {
+    $universe = $records | Where-Object { $_.event -eq 'universe' }
+    if ($universe.count -gt 0) {
+        $env:SURGERADAR_SYMBOLS = $universe.symbols -join ','
+    }
+}
+```
+
+This does not start live-detect or rotate subscriptions. Each `universe` call
+rechecks source access once per endpoint before selecting; enabling the variable
+alone never bypasses entitlement checks. If only one source succeeds, use only
+that source. If both are forbidden/unavailable, discovery remains disabled with
+explicit failures and no alternative paid endpoint or scraping. A 429 disables
+selection even if the first source succeeded. Empty selection returns exit 5.
+
+For fixture-only development, without credentials or network:
+
+```powershell
+.\.venv\Scripts\python.exe -m surgeradar universe --universe-fixture fixtures/screener_universe.json
+```
+
+Fixture output is marked fixture_only and discovery_enabled=false; it never
+proves account access. Synthetic symbols must not be treated as live recommendations.
+The pure selector unions top stock gainers and most-active-by-volume symbols,
+deduplicates each source, ranks metrics descending (ties alphabetically), then
+sorts by reciprocal rank sum descending and symbol ascending. Maximum output
+is 30 unique explicit symbols. Score = mover_weight/mover_rank +
+active_weight/active_rank; an absent source contributes zero. Default weights
+are 1/1, configurable positive integers via SURGERADAR_UNIVERSE_MOVER_WEIGHT
+and SURGERADAR_UNIVERSE_ACTIVE_WEIGHT. Scores are exact rational strings.
+
+Each selected symbol exposes mover_rank, active_rank, score, source reasons and
+asset_metadata_verified. Where optional asset metadata is supplied to the
+selector, non-us_equity, inactive and untradable assets are excluded. Fully
+verified metadata requires class=us_equity, status=active and tradable=true.
+Missing/partial metadata stays explicitly unverified; no extra asset endpoint
+is queried. The fixture supports an `assets` map for this boundary.
+
+Universe JSON includes generated_at, universe_version, symbols, count,
+candidates, config and limitations. Screener outputs are labeled
+feed=sip_based_screener and coverage_class=discovery_not_stream_coverage,
+distinct from the monitoring_feed=iex. Receiving SIP-based discovery data
+does not establish SIP streaming entitlement or full-market IEX coverage.
+Ranking is for discovery coverage, not future surge prediction.
+
+Official sources checked 2026-10-02:
+[most actives](https://docs.alpaca.markets/us/reference/mostactives-1),
+[stock movers](https://docs.alpaca.markets/us/reference/movers-1), and the
+[Alpaca SDK response models](https://github.com/alpacahq/alpaca-py/blob/master/alpaca/data/models/screener.py).
 
 ## Live IEX detector validation
 
