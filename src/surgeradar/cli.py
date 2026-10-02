@@ -8,10 +8,19 @@ from .runner import run
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Alpaca IEX/SIP ingestion diagnostics (no detector)")
-    parser.add_argument("mode", choices=("check", "smoke", "broad"),
+    parser = argparse.ArgumentParser(description="Alpaca ingestion diagnostics and offline detector replay")
+    parser.add_argument("mode", choices=("check", "smoke", "broad", "replay"),
                         help="selected-feed check, small symbols, or SIP-only all-symbol benchmark")
+    parser.add_argument("fixture", nargs="?", help="local JSONL fixture for replay")
+    parser.add_argument("--config", help="JSON detector threshold overrides for replay")
     args = parser.parse_args(argv)
+    if args.mode == "replay":
+        if not args.fixture:
+            parser.error("replay requires a local JSONL fixture")
+        from .replay import main as replay_main
+        return replay_main(args.fixture, args.config)
+    if args.fixture or args.config:
+        parser.error("fixture and --config are replay-only")
     log = JsonLog(secrets=(os.environ.get("APCA_API_KEY_ID", ""),
                           os.environ.get("APCA_API_SECRET_KEY", "")))
     selected = os.environ.get("SURGERADAR_FEED", "").strip()

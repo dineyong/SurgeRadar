@@ -1,9 +1,80 @@
-# SurgeRadar V0.1a
+# SurgeRadar V0.2
 
 Issues [#2](https://github.com/dineyong/SurgeRadar/issues/2) and
 [#3](https://github.com/dineyong/SurgeRadar/issues/3): validate explicitly selected
 Alpaca IEX or SIP entitlement and minute-bar ingestion in one Python process.
-No detector, baseline, database, alerts, post-signal tracking or trading code.
+Issue [#4](https://github.com/dineyong/SurgeRadar/issues/4) adds an independent
+detector core and offline replay. The live ingestion runner does not invoke it.
+No relative-volume baseline, database, alerts, post-signal tracking or trading code.
+
+## Offline detector replay
+
+After installation, from the repository root (no API credentials required):
+
+```powershell
+.\.venv\Scripts\python.exe -m surgeradar replay fixtures/synthetic_iex.jsonl
+```
+
+The synthetic IEX fixture includes six symbols: SURGE (accelerating surge),
+STEADY (steady rise), WEAKVOL (weak volume), NOMOM (insufficient momentum),
+LOW (under $1), and GAP (missing minute). Only SURGE should detect.
+Output is JSON Lines of `detection`, `candidate_rejection`, then `replay_summary`.
+The core returns every evaluation, including non-candidates; the CLI omits these
+non-candidate evaluations to keep output readable. Candidates during warm-up
+are rejections with explicit history failures and null unavailable features.
+
+Each fixture line is a normalized bar with required `provider`, `feed`, `symbol`,
+`event_at`, `open`, `high`, `low`, `close`, and `volume`. Prices can be decimal
+strings; the fixture uses `provider=alpaca, feed=iex` as **synthetic source labels**,
+not as evidence of live data. `received_at`, `vwap`, and `trade_count` are optional.
+Omitted receive time is deterministically event time + 60 seconds; no current
+clock is used. The existing IEX/SIP model metadata is retained without changing
+live ingestion. Replay rejects missing source metadata, invalid bars, empty
+fixtures and duplicate provider/feed/symbol/timestamp keys before emitting results.
+
+Replay sorts input by timestamp, with provider/feed/symbol as deterministic tie
+breakers. It evaluates each bar using only the current and earlier bars, keeping
+at most six contiguous minutes per provider/feed/symbol. A missing minute or
+overnight gap resets that history. Direct core calls reject duplicates and
+out-of-order input. Results contain symbol, minute-start `feature_at`, close as
+`detected_price`, all features, predicate values/operators/thresholds/pass flags,
+failed predicate names, candidate/detected flags, provider/feed/coverage_class,
+`detector_version=v0.1-no-rvol`, and the full threshold configuration.
+
+For current close C[k], `change_nm = C[k]/C[k-n] - 1` (fractional return).
+`volume_5m` sums k-4 through k. `dollar_volume_5m` sums close * volume over those
+five bars: a bar-level approximation, not exact trade notional. Acceleration is
+`change_1m - ((C[k-1]/C[k-3] - 1)/2)`. Decimal arithmetic uses fixed precision
+28 and rounding independently of the caller's numeric context.
+
+| Config field | Default | Detection comparison |
+|---|---|---|
+| min_price | 1.00 | close >= |
+| min_change_1m | 0.008 | change_1m >= |
+| min_change_3m | 0.012 | change_3m >= |
+| min_change_5m | 0 | change_5m strictly > |
+| min_acceleration | 0.004 | acceleration >= |
+| min_volume_1m | 5000 | current bar volume >= |
+| min_dollar_volume_5m | 250000 | five-bar dollar volume >= |
+| candidate_change_1m | 0.004 | candidate if change_1m >= OR next row |
+| candidate_change_3m | 0.008 | candidate if change_3m >= |
+
+All detection predicates and six-minute contiguous history must pass. Candidate
+status alone never causes a detection. Candidate thresholds do not prevent an
+otherwise matching detection when custom configuration makes them stricter.
+IEX volume remains IEX-only; future results must stay separated by
+provider/feed/detector version/config.
+
+Override any threshold with a local JSON object, e.g.
+`{"min_price":"2.00","min_volume_1m":"10000"}`, then run:
+
+```powershell
+.\.venv\Scripts\python.exe -m surgeradar replay fixtures/synthetic_iex.jsonl --config thresholds.json
+```
+
+Unknown fields, negative/nonfinite values, and malformed input return exit 2.
+Thresholds are algorithm plumbing for later validation; synthetic results do not
+establish profitability or predictive quality.
 
 ## Install
 
