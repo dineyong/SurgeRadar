@@ -1,5 +1,7 @@
 # SurgeRadar V0.5
 
+기기 간 작업 안내: [맥과 Windows 개발 환경](docs/work-environment.md) · [작업 인수인계](docs/handoff.md).
+
 Issues [#2](https://github.com/dineyong/SurgeRadar/issues/2) and
 [#3](https://github.com/dineyong/SurgeRadar/issues/3): validate explicitly selected
 Alpaca IEX or SIP entitlement and minute-bar ingestion in one Python process.
